@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f4f6fb;
+  --foreground: #1c1f2a;
+  --paper: #ffffff;
+  --muted: #5a6272;
+  --line: #e2e5f0;
+  --wash: #eef1fa;
+  --blue: #2c40d3;
+  --blue-press: #2436b5;
+  --danger: #8c2f2f;
+  --focus-card: #f7f8fe;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-paper: var(--paper);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-wash: var(--wash);
+  --color-blue: var(--blue);
+  --color-blue-press: var(--blue-press);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-geist-sans);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), ui-sans-serif, sans-serif;
+}
+
+::selection {
+  background: #d9def8;
+}
+
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+::placeholder {
+  color: var(--muted);
+}
+
+input,
+textarea,
+select {
+  color-scheme: light;
+}
+
+.card,
+.card-focus {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+}
+
+.card-focus {
+  border-left: 3px solid var(--blue);
+  background: var(--focus-card);
+}
