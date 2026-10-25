@@ -1,5 +1,3 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { BlobAccessError, BlobError, BlobNotFoundError, get, put } from "@vercel/blob";
 import { parseBoard, withFocus, type Board } from "./model";
 import { seedBoard } from "./seed";
@@ -7,9 +5,11 @@ import { seedBoard } from "./seed";
 const BLOB_PATH = "board/items.json";
 
 let queue: Promise<void> = Promise.resolve();
-let memoryBoard: Board | null = null;
-let memoryOnly = false;
 let blobAccess: "public" | "private" | null = null;
+
+export function usesBlob(): boolean {
+  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+}
 
 export function loadBoard(): Promise<Board> {
   return enqueue(readRaw);
@@ -34,7 +34,7 @@ function enqueue<T>(task: () => Promise<T>): Promise<T> {
 }
 
 function blobEnabled(): boolean {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
+  return usesBlob();
 }
 
 function blobAuth(): { token?: string } {
@@ -42,51 +42,14 @@ function blobAuth(): { token?: string } {
   return token ? { token } : {};
 }
 
-function filePath(): string {
-  return path.join(process.cwd(), "data", "board.json");
-}
-
 async function readRaw(): Promise<Board> {
-  if (blobEnabled()) return readBlob();
-  if (memoryOnly) return memoryBoard ?? seedBoard();
-  try {
-    const text = await readFile(filePath(), "utf8");
-    return parseBoard(JSON.parse(text) as unknown);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") return seedBoard();
-    if (code === "EACCES" || code === "EROFS" || code === "EPERM") {
-      memoryOnly = true;
-      return memoryBoard ?? seedBoard();
-    }
-    if (error instanceof Error && error.message === "The saved board could not be read.") throw error;
-    if (error instanceof SyntaxError) throw new Error("The saved board could not be read.");
-    throw new Error("Could not read the board.");
-  }
+  if (!blobEnabled()) return seedBoard();
+  return readBlob();
 }
 
 async function writeRaw(board: Board): Promise<void> {
-  if (blobEnabled()) {
-    await writeBlob(board);
-    return;
-  }
-  if (memoryOnly) {
-    memoryBoard = board;
-    return;
-  }
-  try {
-    const target = filePath();
-    await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, JSON.stringify(board, null, 2), "utf8");
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "EACCES" || code === "EROFS" || code === "EPERM") {
-      memoryOnly = true;
-      memoryBoard = board;
-      return;
-    }
-    throw new Error("Could not save.");
-  }
+  if (!blobEnabled()) throw new Error("Could not save.");
+  await writeBlob(board);
 }
 
 async function readBlob(): Promise<Board> {

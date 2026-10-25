@@ -1,30 +1,90 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { addItem, deleteItem, editItem, reorderFocus } from "@/app/actions";
-import { AREAS, GROUP_ORDER, type Area, type Board, type BoardResult, type ItemInput } from "@/lib/model";
+import { useRef, useState, useTransition } from "react";
+import { addItem, deleteItem, editItem, reorderFocus, replaceBoard } from "@/app/actions";
+import { readStoredBoard, writeStoredBoard } from "@/lib/local-board";
+import {
+  AREAS,
+  GROUP_ORDER,
+  createItem,
+  moveFocus,
+  parseBoard,
+  parseItemInput,
+  removeItem,
+  updateItem,
+  withFocus,
+  type Area,
+  type Board,
+  type BoardResult,
+  type ItemInput,
+} from "@/lib/model";
 import { AddForm } from "./add-form";
 import { ItemCard } from "./item-card";
-import { fieldClass } from "./styles";
+import { fieldClass, secondaryClass } from "./styles";
 
 function statusHeadingId(status: string): string {
   return `status-${status.replaceAll(" ", "-").toLowerCase()}`;
 }
 
-export function BoardView({ initial }: { initial: Board }) {
-  const [board, setBoard] = useState(initial);
-  const [area, setArea] = useState<Area | "All">("All");
-  const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+function loadLocalBoard(seed: Board): { board: Board; error: string | null } {
+  try {
+    const stored = readStoredBoard();
+    if (stored) return { board: stored, error: null };
+    writeStoredBoard(seed);
+    return { board: seed, error: null };
+  } catch {
+    return { board: seed, error: "Could not read saved notes." };
+  }
+}
 
-  function run(task: () => Promise<BoardResult>): Promise<BoardResult> {
+export function BoardView({ mode, initial }: { mode: "local" | "blob"; initial: Board }) {
+  const [stored] = useState(() =>
+    mode === "local" ? loadLocalBoard(initial) : { board: initial, error: null as string | null },
+  );
+  const [board, setBoard] = useState(stored.board);
+  const [area, setArea] = useState<Area | "All">("All");
+  const [error, setError] = useState<string | null>(stored.error);
+  const [pending, startTransition] = useTransition();
+  const importRef = useRef<HTMLInputElement>(null);
+
+  function remember(result: BoardResult) {
+    if (result.ok) setBoard(result.board);
+    else setError(result.error);
+  }
+
+  function saveLocal(change: (current: Board) => Board): BoardResult {
+    const next = withFocus(change(board));
+    writeStoredBoard(next);
+    return { ok: true, board: next };
+  }
+
+  function run(
+    change: (current: Board) => Board,
+    server: () => Promise<BoardResult>,
+  ): Promise<BoardResult> {
     setError(null);
+    if (mode === "local") {
+      try {
+        const result = saveLocal(change);
+        remember(result);
+        return Promise.resolve(result);
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : "Could not save.";
+        const result: BoardResult = {
+          ok: false,
+          error: message === "Could not save." || message.startsWith("Add ") || message.startsWith("Pick ") || message.startsWith("Title ") || message.startsWith("Note ") || message.startsWith("Due ") || message === "That item is gone."
+            ? message
+            : "Could not save.",
+        };
+        setError(result.error);
+        return Promise.resolve(result);
+      }
+    }
     return new Promise((resolve) => {
       startTransition(async () => {
         try {
-          const result = await task();
-          if (result.ok) setBoard(result.board);
-          else setError(result.error);
+          const result = await server();
+          remember(result);
           resolve(result);
         } catch {
           const result: BoardResult = { ok: false, error: "Could not save." };
@@ -32,6 +92,40 @@ export function BoardView({ initial }: { initial: Board }) {
           resolve(result);
         }
       });
+    });
+  }
+
+  function exportBoard() {
+    const file = new Blob([JSON.stringify(board, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(file);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "jeune-jolie-board.json";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function importBoard(file: File) {
+    setError(null);
+    void file.text().then(async (text) => {
+      let parsed: Board;
+      try {
+        parsed = parseBoard(JSON.parse(text) as unknown);
+      } catch {
+        setError("Could not read that file.");
+        return;
+      }
+      if (mode === "local") {
+        try {
+          writeStoredBoard(parsed);
+          setBoard(parsed);
+        } catch {
+          setError("Could not save.");
+        }
+        return;
+      }
+      const result = await replaceBoard(parsed);
+      remember(result);
     });
   }
 
@@ -49,6 +143,30 @@ export function BoardView({ initial }: { initial: Board }) {
 
   return (
     <div className="grid gap-10" aria-busy={pending}>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={secondaryClass} onClick={exportBoard}>
+          Export
+        </button>
+        <button
+          type="button"
+          className={secondaryClass}
+          onClick={() => importRef.current?.click()}
+        >
+          Import
+        </button>
+        <input
+          ref={importRef}
+          className="sr-only"
+          type="file"
+          accept="application/json,.json"
+          aria-label="Import board JSON"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) importBoard(file);
+          }}
+        />
+      </div>
       {error ? (
         <p role="alert" className="text-sm text-danger">
           {error}
@@ -72,10 +190,30 @@ export function BoardView({ initial }: { initial: Board }) {
                   busy={pending}
                   canMoveUp={index > 0}
                   canMoveDown={index < focusItems.length - 1}
-                  onSave={(input) => run(() => editItem(item.id, input))}
-                  onDelete={() => run(() => deleteItem(item.id))}
-                  onMoveUp={() => void run(() => reorderFocus(item.id, -1))}
-                  onMoveDown={() => void run(() => reorderFocus(item.id, 1))}
+                  onSave={(input) =>
+                    run(
+                      (current) => updateItem(current, item.id, parseItemInput(input)),
+                      () => editItem(item.id, input),
+                    )
+                  }
+                  onDelete={() =>
+                    run(
+                      (current) => removeItem(current, item.id),
+                      () => deleteItem(item.id),
+                    )
+                  }
+                  onMoveUp={() =>
+                    void run(
+                      (current) => moveFocus(current, item.id, -1),
+                      () => reorderFocus(item.id, -1),
+                    )
+                  }
+                  onMoveDown={() =>
+                    void run(
+                      (current) => moveFocus(current, item.id, 1),
+                      () => reorderFocus(item.id, 1),
+                    )
+                  }
                 />
               </li>
             ))}
@@ -89,7 +227,12 @@ export function BoardView({ initial }: { initial: Board }) {
         </h2>
         <AddForm
           busy={pending}
-          onAdd={(input: ItemInput) => run(() => addItem(input))}
+          onAdd={(input: ItemInput) =>
+            run(
+              (current) => createItem(current, parseItemInput(input)),
+              () => addItem(input),
+            )
+          }
         />
       </section>
 
@@ -131,8 +274,18 @@ export function BoardView({ initial }: { initial: Board }) {
                       formKey={`list-${item.id}`}
                       titleLevel="h4"
                       busy={pending}
-                      onSave={(input) => run(() => editItem(item.id, input))}
-                      onDelete={() => run(() => deleteItem(item.id))}
+                      onSave={(input) =>
+                        run(
+                          (current) => updateItem(current, item.id, parseItemInput(input)),
+                          () => editItem(item.id, input),
+                        )
+                      }
+                      onDelete={() =>
+                        run(
+                          (current) => removeItem(current, item.id),
+                          () => deleteItem(item.id),
+                        )
+                      }
                     />
                   </li>
                 ))}

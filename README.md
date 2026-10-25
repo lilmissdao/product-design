@@ -11,9 +11,7 @@ npm run dev
 
 Open http://localhost:3000.
 
-With no Blob token, the board is stored in `data/board.json` (not committed). The first visit shows the seed notes. Add, edit, delete, and focus order survive a reload.
-
-If that file cannot be written, the app keeps the board in memory for the current process.
+With no `BLOB_READ_WRITE_TOKEN`, notes stay in this browser (`localStorage`). The first visit saves the seed notes. Add, edit, delete, and focus order survive a reload on that device. Export downloads a JSON backup. Import replaces the board from a file.
 
 To try the passcode gate locally, set `BOARD_PASSCODE` in `.env.local` and restart.
 
@@ -21,19 +19,13 @@ To try the passcode gate locally, set `BOARD_PASSCODE` in `.env.local` and resta
 
 Import this repo and deploy with the defaults. No extra build settings.
 
-### Blob store
+No environment variables are required. On Vercel the app does not write to the filesystem. Without `BLOB_READ_WRITE_TOKEN`, each browser keeps its own copy and can move notes with Export and Import.
 
-Notes sync across devices only after a Blob store is connected.
+### Blob store, later
 
-1. In the Vercel project, open **Storage** and create a Blob store. Use a **private** store so `board/items.json` is not available at a public URL. The passcode does not protect a public blob URL.
-2. Connect the store to this project. Vercel sets `BLOB_READ_WRITE_TOKEN` for a token-based store, or `BLOB_STORE_ID` for a private store that uses Vercel’s own login. Either one turns Blob on.
-3. Redeploy.
+When a Blob store is available, connect it so Vercel sets `BLOB_READ_WRITE_TOKEN`, then redeploy. Prefer a **private** store. The app then keeps one JSON document at `board/items.json` and shares it across devices. The passcode does not protect a public blob URL.
 
-The app keeps a single JSON document at `board/items.json`. Reads skip the CDN cache so a save shows up on the next load.
-
-If the store type and the app disagree, set `BLOB_ACCESS` to `private` or `public` to match the store. Leave it unset to try private first, then public.
-
-Until one of those Blob variables is set, a deployed copy still opens, but notes stay in that instance’s memory and do not sync.
+If the store type and the app disagree, set `BLOB_ACCESS` to `private` or `public`. Leave it unset to try private first, then public.
 
 ### Passcode
 
@@ -45,7 +37,6 @@ Do not commit the passcode or the Blob token.
 
 | Name | Required | Purpose |
 | --- | --- | --- |
-| `BLOB_READ_WRITE_TOKEN` | For shared notes | Set when a Blob store is connected with a read-write token |
-| `BLOB_STORE_ID` | For shared notes | Set when a private Blob store is connected with Vercel login |
+| `BLOB_READ_WRITE_TOKEN` | No | Turns on shared Blob storage. Without it, the browser stores the board |
 | `BLOB_ACCESS` | No | `private` or `public`, if you need to force the store type |
 | `BOARD_PASSCODE` | No | Simple passcode gate |

@@ -5,6 +5,7 @@ import {
   assertId,
   createItem,
   moveFocus,
+  parseBoard,
   parseItemInput,
   removeItem,
   updateItem,
@@ -71,6 +72,17 @@ export async function deleteItem(id: string): Promise<BoardResult> {
   try {
     const itemId = assertId(id);
     const board = await changeBoard((current) => removeItem(current, itemId));
+    return { ok: true, board };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function replaceBoard(value: unknown): Promise<BoardResult> {
+  const denied = await requireAccess();
+  if (denied) return { ok: false, error: denied };
+  try {
+    const board = await changeBoard(() => parseBoard(value));
     return { ok: true, board };
   } catch (error) {
     return failure(error);

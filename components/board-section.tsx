@@ -1,9 +1,11 @@
 import { connection } from "next/server";
 import { isAuthed } from "@/lib/auth";
 import type { Board } from "@/lib/model";
-import { loadBoard } from "@/lib/store";
+import { seedBoard } from "@/lib/seed";
+import { loadBoard, usesBlob } from "@/lib/store";
 import { BoardView } from "./board-view";
 import { Gate } from "./gate";
+import { LocalBoardView } from "./local-board-view";
 
 const READ_ERRORS = new Set([
   "Could not read the board.",
@@ -16,6 +18,10 @@ const READ_ERRORS = new Set([
 export async function BoardSection() {
   await connection();
   if (!(await isAuthed())) return <Gate />;
+
+  if (!usesBlob()) {
+    return <LocalBoardView initial={seedBoard()} />;
+  }
 
   let board: Board | null = null;
   let message = "Could not read the board.";
@@ -34,5 +40,5 @@ export async function BoardSection() {
     );
   }
 
-  return <BoardView initial={board} />;
+  return <BoardView mode="blob" initial={board} />;
 }
